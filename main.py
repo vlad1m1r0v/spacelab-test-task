@@ -1,242 +1,363 @@
-import json
-import random
-import os.path
-from enum import Enum
-from collections import deque
 import logging
-from typing import List
+import os
+import random
+import json
+import sys
+from collections import deque
+from typing import Deque
 
 # setup logger
-logging.basicConfig(level=logging.INFO, filename='game.log', filemode='w',
-                    format='%(asctime)s %(levelname)s %(message)s')
+logging.basicConfig(level=logging.DEBUG,
+                    filemode='w',
+                    format='%(asctime)s %(levelname)s %(message)s',
+                    datefmt='%d %b %Y')
 # health constants
 INITIAL_HEALTH = 5
 HEAL_POINTS = 3
-# map constants
+# map
 INITIAL_PLAIN = [
     ['X', 'X', 'X', 'X', 'H', ' ', ' ', 'F'],
     ['X', 'X', 'K', 'X', 'X', ' ', 'X', 'X'],
     ['X', ' ', ' ', ' ', 'X', ' ', 'H', 'X'],
     [' ', ' ', 'X', ' ', ' ', ' ', 'X', 'X']
 ]
+SPAWN_POINT = [3, 0]
+
+# cell variables
+BLOCKED = 'X'
+FREE = ' '
+KEY = 'K'
+HEAL = 'H'
+FINISH = 'F'
+# 'D' stands for Damage
+FIRE = 'D'
 
 
-class Mark(Enum):
-    BLOCKED = 'X'
-    FREE = ' '
-    PLAYER = 'P'
-    KEY = 'K'
-    HEAL = 'H'
-    FINISH = 'F'
-    # fire cell
-    DANGER = 'D'
-
-
-# for putting random fire on them
-def find_white_cells(plain):
+def white_cells(plain):
     cells = []
     for row in range(len(plain)):
         for col in range(len(plain[row])):
-            if plain[row][col] == Mark.FREE.value:
+            if plain[row][col] == FREE:
                 cells.append((row, col))
     return cells
 
 
-WHITE_CELLS = find_white_cells(INITIAL_PLAIN)
-FIRE_CELLS = 4
-SPAWN_POINT = [3, 0]
-
-
-# utility function that checks save file
-def save_exists():
-    return os.path.exists('save.json')
-
-
-class Direction(Enum):
-    w = [-1, 0]
-    s = [1, 0]
-    a = [0, -1]
-    d = [0, 1]
-
-
-class Key(Enum):
-    YES = 'y'
-    NO = 'n'
-    UP = 'u'
-    DOWN = 'd'
-    LEFT = 'l'
-    RIGHT = 'r'
-    ATTACK = 'a'
-    HEAL = 'h'
-    SAVE = 's'
+# for putting fire on them randomly
+WHITE_CELLS = white_cells(INITIAL_PLAIN)
+FIRE_AMOUNT = 4
+# actions keys
+YES = 'y'
+NO = 'n'
+SAVE = 's'
+UP = 'u'
+DOWN = 'd'
+LEFT = 'l'
+RIGHT = 'r'
+HEAL = 'h'
+TAKE = 't'
+FIGHT = 'f'
+# direction is key, vector is value
+move: dict[str, list] = {
+    UP: [-1, 0],
+    DOWN: [1, 0],
+    LEFT: [0, -1],
+    RIGHT: [0, 1]
+}
 
 
 class Player:
     def __init__(self, name: str,
                  health: int = None,
                  has_key: bool = None,
-                 current_pos: list = None,
-                 previous_pos: list = None,
-                 heal_points: int = None):
-        self.name: str = name
-        self.health: int = health if health is not None else INITIAL_HEALTH
-        self.has_key: bool = has_key if has_key is not None else False
-        self.current_pos: list = current_pos if current_pos is not None else SPAWN_POINT
-        self.previous_pos: list = previous_pos if previous_pos is not None else None
-        self.heal_points: int = heal_points if heal_points is not None else HEAL_POINTS
+                 cur: list = None,
+                 prev: list = None,
+                 hp: int = None):
+        self.__name: str = name
+        self.__health: int = health if health is not None else INITIAL_HEALTH
+        self.__has_key: bool = has_key if has_key is not None else False
+        self.__cur: list = cur if cur is not None else SPAWN_POINT
+        self.__prev: list = prev
+        self.__hp: int = hp if hp is not None else HEAL_POINTS
 
     @property
-    def can_heal(self):
-        return self.health < INITIAL_HEALTH and self.heal_points > 0
+    def name(self):
+        return self.__name
 
-    def heal(self):
-        self.health += 1
-        self.heal_points -= 1
+    @property
+    def health(self):
+        return self.__health
 
-    def attack(self):
-        self.health -= 1
+    @property
+    def has_key(self):
+        return self.__has_key
 
-    def restore_health(self):
-        self.health = INITIAL_HEALTH
+    @property
+    def cur(self):
+        return self.__cur.copy()
+
+    @property
+    def prev(self):
+        if isinstance(self.__prev, list):
+            return self.__prev.copy()
+        return None
+
+    @property
+    def hp(self):
+        return self.__hp
+
+    @property
+    def is_alive(self):
+        return self.__health > 0
+
+    @property
+    def has_hp(self):
+        return self.__hp > 0
 
     def assign_key(self):
-        self.has_key = True
+        self.__has_key = True
 
     def drop_key(self):
-        self.has_key = False
+        self.__has_key = False
 
-    def move(self, move):
-        # assign value, not reference
-        self.previous_pos = self.current_pos.copy()
-        player_y, player_x = self.current_pos
-        dy, dx = move
-        self.current_pos = [player_y + dy, player_x + dx]
+    def receive_damage(self):
+        self.__health -= 1
+
+    def restore_health(self):
+        self.__health = INITIAL_HEALTH
+
+    def heal(self):
+        self.__health += 1
+        self.__hp -= 1
+
+    def is_step_back(self, dydx: list):
+        py, px = self.cur
+        dy, dx = dydx
+        return self.prev == [py + dy, px + dx]
+
+    def move(self, dydx: list):
+        self.__prev = self.cur
+        py, px = self.cur
+        dy, dx = dydx
+        self.__cur = [py + dy, px + dx]
+
+
+class GameMap:
+    def __init__(self, plain: list[list] = None):
+        self.__plain = plain if plain is not None else INITIAL_PLAIN
+
+    @property
+    def plain(self):
+        return self.__plain
+
+    # for fire and key
+    def __mark_cell(self, pos: list, cell: str):
+        self.__plain[pos[0]][pos[1]] = cell
+
+    # many for fire, once for key
+    def __clear_cell(self, cell: str, many: bool = False):
+        for row in range(len(self.__plain)):
+            for col in range(len(self.__plain[row])):
+                if self.__plain[row][col] == cell:
+                    self.__plain[row][col] = FREE
+                    if not many:
+                        return
+
+    def spawn_fire(self):
+        fire_cells = random.sample(WHITE_CELLS, FIRE_AMOUNT)
+        for cell in fire_cells:
+            self.__mark_cell(cell, FIRE)
+        logging.info(f'Fire spawned at cells {", ".join(map(str, fire_cells))}')
+
+    def clear_fire(self):
+        self.__clear_cell(cell=FIRE, many=True)
+
+    def spawn_key(self, pos: list):
+        self.__mark_cell(pos, KEY)
+
+    def clear_key(self):
+        self.__clear_cell(KEY)
+
+    def is_fire(self, pos: list) -> bool:
+        return self.__plain[pos[0]][pos[1]] == FIRE
+
+    def is_heal(self, pos: list) -> bool:
+        return self.__plain[pos[0]][pos[1]] == HEAL
+
+    def is_key(self, pos: list) -> bool:
+        return self.__plain[pos[0]][pos[1]] == KEY
+
+    def is_heal_or_key(self, pos: list) -> bool:
+        return self.__plain[pos[0]][pos[1]] in [KEY, HEAL]
+
+    def is_finish(self, pos: list):
+        return self.__plain[pos[0]][pos[1]] == FINISH
+
+    def is_valid_move(self, dydx: list, p: Player):
+        dy, dx = dydx
+        py, px = p.cur
+        pos_y, pos_x = py + dy, px + dx
+        is_inside_map = 0 <= pos_y < len(self.__plain) and 0 <= pos_x < len(self.plain[0])
+        if not is_inside_map:
+            return is_inside_map
+        return self.__plain[pos_y][pos_x] != BLOCKED
+
+
+class SaveManager:
+    @staticmethod
+    def save_exists():
+        return os.path.exists('save.json')
+
+    @staticmethod
+    def save(q: Deque[Player], gm: GameMap):
+        data = {
+            'queue': [{
+                'name': p.name,
+                'health': p.health,
+                'has_key': p.has_key,
+                'cur': p.cur,
+                'prev': p.prev,
+                'hp': p.hp
+            } for p in q],
+            'map': gm.plain
+        }
+        try:
+            with open('save.json', 'w') as f:
+                json.dump(data, f, indent=4)
+        except IOError:
+            # If the file doesn't exist, create it and write the save
+            with open('save.json', 'w+') as f:
+                json.dump(data, f, indent=4)
+
+    @staticmethod
+    def load():
+        with open('save.json', 'r') as f:
+            data = json.load(f)
+        return {
+            'map': GameMap(plain=data['plain']),
+            'queue': deque(Player(**p) for p in data['queue'])
+        }
 
 
 class Game:
     def __init__(self):
-        self.queue = deque()
-        self.plain = INITIAL_PLAIN
+        self.__queue = deque()
+        self.__map = GameMap()
 
-    def save(self):
-        progress = {'plain': self.plain,
-                    'queue': [p.__dict__ for p in self.queue]}
-        try:
-            with open('save.json', 'w') as f:
-                json.dump(progress, f, indent=4)
-        except IOError:
-            # If the file doesn't exist, create it and write the save
-            with open('save.json', 'w+') as f:
-                json.dump(progress, f, indent=4)
+    def __load(self):
+        data = SaveManager.load()
+        self.__queue = data['queue']
+        self.__map = data['map']
 
-    def load(self):
-        with open('save.json', 'r') as f:
-            progress = json.load(f)
-        self.plain = progress['plain']
-        self.queue = deque(Player(**player) for player in progress['queue'])
+    def __handle_save(self, p: Player):
+        SaveManager.save(self.__queue, self.__map)
+        logging.info(f'{p.name} saved a game')
+        # save is not counted as action, push player back
+        # to the start of the queue and let him repeat action
+        self.__queue.append(p)
+        self.__action()
 
-    def mark(self, mark: Mark, pos: list):
-        self.plain[pos[0]][pos[1]] = mark.value
+    def __drop_key_and_kick_after_death(self, p: Player):
+        if p.has_key:
+            p.drop_key()
+            self.__map.spawn_key(p.cur)
+        if p in self.__queue:
+            self.__queue.remove(p)
+        logging.info(f'{p.name} died: kicked from the game')
 
-    def clear_mark(self, mark: Mark, each: bool = False):
-        for row in range(len(self.plain)):
-            for col in range(len(self.plain[row])):
-                if self.plain[row][col] == mark.value:
-                    self.plain[row][col] = Mark.FREE.value
-                    if not each:
-                        return
-
-    def render(self):
-        rows = [''.join(row) for row in self.plain]
-        print('\n'.join(rows))
-
-    def spawn_fire(self) -> List:
-        fire_cells = random.sample(WHITE_CELLS, FIRE_CELLS)
-        for cell in fire_cells:
-            self.mark(Mark.DANGER, cell)
-        return fire_cells
-
-    def hit_wall(self, player: Player):
-        p_y, p_x = player.current_pos
-        if 0 <= p_y < len(self.plain) \
-                and 0 <= p_x < len(self.plain[0]) \
-                and self.plain[p_y][p_x] != Mark.BLOCKED:
+    def __check_hit_wall(self, dydx: list, p: Player):
+        if self.__map.is_valid_move(dydx=dydx, p=p):
             return
-        player.attack()
-        logging.info(f'{player.name} hit on the wall, - 1 HP')
+        p.receive_damage()
+        logging.info(f'{p.name} hit the wall: - 1 health')
+        if not p.is_alive:
+            self.__drop_key_and_kick_after_death(p)
+            self.__action()
+        self.__queue.appendleft(p)
+        self.__action()
 
-    def step_on_fire(self, player: Player):
-        p_y, p_x = player.current_pos
-        if self.plain[p_y][p_x] == Mark.DANGER.value:
-            player.attack()
-            logging.info(f'{player.name} stepped on fire, - 1 HP')
+    def __check_step_back(self, dydx: list, p: Player):
+        if p.is_step_back(dydx) and self.__map.is_heal_or_key(p.cur):
+            logging.info(f'{p.name} stepped back: kicked from the game')
+            self.__action()
 
-    def step_on_heal_cell(self, player: Player):
-        p_y, p_x = player.current_pos
-        if self.plain[p_y][p_x] == Mark.HEAL.value:
-            player.restore_health()
-            logging.info(f'{player.name} health is restored, 5 HP / 5 HP')
+    def __check_other_players_on_cell(self, p: Player):
+        present_names = [other.name for other in self.__queue if other.cur == p.cur]
+        if len(present_names):
+            logging.info('Other players present on cell %:', ', '.join(present_names))
 
-    def is_step_back(self, player: Player, move: List):
-        p_y, p_x = player.current_pos
-        m_y, m_x = move
-        next_pos = [p_y + m_y, p_x + m_x]
-        if next_pos == player.previous_pos \
-                and self.plain[p_y][p_x] not in [Mark.HEAL.value, Mark.KEY.value]:
-            logging.info(f'{player.name} stepped back, kicked from the game')
-            return True
-        return False
+    def __check_step_on_fire(self, p: Player):
+        if self.__map.is_fire(p.cur):
+            p.receive_damage()
+            logging.info(f'{p.name} stepped on fire: -1 health')
+            if not p.is_alive:
+                self.__drop_key_and_kick_after_death(p)
+                self.__action()
+            self.__queue.appendleft(p)
+            self.__action()
 
-    def step_on_key_cell(self, player: Player):
-        p_y, p_x = player.current_pos
-        if self.plain[p_y][p_x] == Mark.KEY.value:
-            player.assign_key()
-            self.clear_mark(Mark.KEY)
-            logging.info(f'{player.name} picked a key')
+    def __check_cell_has_key(self, p: Player):
+        if self.__map.is_key(p.cur):
+            logging.info(f'Cell {p.cur} has key')
+            self.__queue.appendleft(p)
+            self.__action()
 
-    def start(self):
+    def __check_cell_is_heal(self, p: Player):
+        if self.__map.is_heal(p.cur):
+            p.restore_health()
+            logging.info(f'{p.name} restored health: 5 / 5 health')
+            self.__queue.appendleft(p)
+            self.__action()
+
+    def __check_finish(self, p: Player):
+        if self.__map.is_finish(p.cur):
+            if p.has_key:
+                logging.info(f'{p.name} won')
+                sys.exit()
+            else:
+                logging.info(f'{p.name} came to the finish without key')
+                self.__drop_key_and_kick_after_death(p)
+
+    def __handle_move(self, key: str, p: Player):
+        dydx = move[key]
+        self.__check_hit_wall(dydx=dydx, p=p)
+        self.__check_step_back(dydx=dydx, p=p)
+        p.move(dydx)
+        logging.info(f'{p.name} new position: {str(p.cur)}')
+        self.__check_other_players_on_cell(p)
+        self.__check_step_on_fire(p)
+        self.__check_cell_has_key(p)
+        self.__check_cell_is_heal(p)
+        self.__check_finish(p)
+        self.__queue.append(p)
+        self.__action()
+
+    def __action(self):
+        # before each action spawn fire
+        self.__map.spawn_fire()
+        # pop player from queue
+        player = self.__queue.pop()
+        key = input(f'{player.name} turn: ')
+        if key == SAVE:
+            self.__handle_save(player)
+        elif key in [UP, DOWN, LEFT, RIGHT]:
+            self.__handle_move(key=key, p=player)
+
+    def __start(self):
         num = int(input('Enter amount of players: '))
         for n in range(num):
             name = input(f'Enter {n + 1} players\'s name: ')
             player = Player(name=name)
-            self.queue.append(player)
-        self.next()
-
-    def next(self):
-        # spawn fire
-        fire_cells = self.spawn_fire()
-        logging.info(f'Fire spawned at coordinates: {", ".join(map(str, fire_cells))}')
-        # take player from queue
-        player = self.queue.popleft()
-        # render map
-        self.render()
-        key = input(f'{player.name} turn: ')
-        if key == Key.SAVE.value:
-            # save is not counted as action, take player back to the queue
-            self.queue.appendleft(player)
-            self.save()
-            logging.info(f'{player.name} saved game')
-            self.next()
-        # handle movement buttons
-        elif key in [Key.UP.value, Key.DOWN.value, Key.LEFT.value, Key.RIGHT.value]:
-            move = Direction[key].value
-            if self.is_step_back(player, move):
-                self.next()
-            player.move(move)
-            # check all cases
-            self.hit_wall(player)
-            self.step_on_fire(player)
-            self.step_on_heal_cell(player)
-            self.step_on_key_cell(player)
+            self.__queue.appendleft(player)
+        self.__action()
 
     def run(self):
-        if save_exists():
-            response = input('You have a safe file. Do you want to load it? (y/n)')
-            if response == Key.YES.value:
-                self.load()
-                self.next()
+        if SaveManager.save_exists():
+            answer = input('You have a safe file. Do you want to load it? (y/n)')
+            if answer == YES:
+                self.__load()
+                self.__action()
         else:
-            self.start()
+            self.__start()
 
 
 game = Game()
