@@ -359,12 +359,17 @@ class Game:
             self.__action()
 
     def __handle_fight(self, p: Player):
+        # can't delete elements in queue while iterate through it,
+        # so we store killed players in array and kick them after loop
+        killed = []
         for player in self.__queue:
             if player.cur == p.cur:
                 player.receive_damage()
                 logging.info(f'{player.name} received damage from {p.name}: {player.health} health left')
                 if not player.is_alive:
-                    self.__drop_key_and_kick_after_death(player)
+                    killed.append(player)
+        for k in killed:
+            self.__drop_key_and_kick_after_death(k)
         self.__queue.appendleft(p)
         self.__action()
 
@@ -386,12 +391,14 @@ class Game:
             self.__handle_move(key=key, p=player)
         elif key == HEAL:
             self.__handle_heal(player)
-        elif key == KEY:
+        elif key == TAKE:
             self.__handle_key(player)
         elif key == FIGHT:
             self.__handle_fight(player)
         else:
             logging.info('Invalid key: try again')
+            self.__queue.append(player)
+            self.__action()
 
     def __start(self):
         num = int(input('Enter amount of players: '))
