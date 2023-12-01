@@ -106,7 +106,7 @@ class Player:
 
     @property
     def can_heal(self):
-        return self.__hp > 0
+        return self.__hp > 0 and self.__health < INITIAL_HEALTH
 
     @property
     def is_alive(self):
