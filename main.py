@@ -233,7 +233,7 @@ class SaveManager:
         with open('save.json', 'r') as f:
             data = json.load(f)
         return {
-            'map': GameMap(plain=data['plain']),
+            'map': GameMap(plain=data['map']),
             'queue': deque(Player(**p) for p in data['queue'])
         }
 
@@ -249,11 +249,11 @@ class Game:
         self.__map = data['map']
 
     def __handle_save(self, p: Player):
-        SaveManager.save(self.__queue, self.__map)
-        logging.info(f'{p.name} saved a game')
         # save is not counted as action, push player back
         # to the start of the queue and let him repeat action
         self.__queue.append(p)
+        SaveManager.save(self.__queue, self.__map)
+        logging.info(f'{p.name} saved a game')
         self.__action()
 
     def __drop_key_and_kick_after_death(self, p: Player):
@@ -283,7 +283,7 @@ class Game:
     def __check_other_players_on_cell(self, p: Player):
         present_names = [other.name for other in self.__queue if other.cur == p.cur]
         if len(present_names):
-            logging.info('Other players present on cell %:', ', '.join(present_names))
+            logging.info('Other players present on cell: {p}'.format(p=', '.join(present_names)))
 
     def __check_step_on_fire(self, p: Player):
         if self.__map.is_fire(p.cur):
@@ -328,7 +328,7 @@ class Game:
         self.__check_cell_has_key(p)
         self.__check_cell_is_heal(p)
         self.__check_finish(p)
-        self.__queue.append(p)
+        self.__queue.appendleft(p)
         self.__action()
 
     def __action(self):
@@ -336,11 +336,13 @@ class Game:
         self.__map.spawn_fire()
         # pop player from queue
         player = self.__queue.pop()
-        key = input(f'{player.name} turn: ')
+        key = input(f'\n{player.name} turn: ')
         if key == SAVE:
             self.__handle_save(player)
         elif key in [UP, DOWN, LEFT, RIGHT]:
             self.__handle_move(key=key, p=player)
+        # clear fire cells after each action
+        self.__map.clear_fire()
 
     def __start(self):
         num = int(input('Enter amount of players: '))
