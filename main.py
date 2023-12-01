@@ -112,10 +112,6 @@ class Player:
     def is_alive(self):
         return self.__health > 0
 
-    @property
-    def has_hp(self):
-        return self.__hp > 0
-
     def assign_key(self):
         self.__has_key = True
 
