@@ -275,7 +275,7 @@ class Game:
         self.__action()
 
     def __check_step_back(self, dydx: list, p: Player):
-        if p.is_step_back(dydx) and self.__map.is_heal_or_key(p.cur):
+        if p.is_step_back(dydx) and not self.__map.is_heal_or_key(p.cur):
             logging.info(f'{p.name} stepped back: kicked from the game')
             self.__action()
 
