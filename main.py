@@ -22,12 +22,11 @@ INITIAL_PLAIN = [
     [' ', ' ', 'X', ' ', ' ', ' ', 'X', 'X']
 ]
 SPAWN_POINT = [3, 0]
-
 # cell variables
 BLOCKED = 'X'
 FREE = ' '
 KEY = 'K'
-HEAL = 'H'
+HEALTH = 'H'
 FINISH = 'F'
 # 'D' stands for Damage
 FIRE = 'D'
@@ -106,6 +105,10 @@ class Player:
         return self.__hp
 
     @property
+    def can_heal(self):
+        return self.__hp > 0
+
+    @property
     def is_alive(self):
         return self.__health > 0
 
@@ -181,7 +184,7 @@ class GameMap:
         return self.__plain[pos[0]][pos[1]] == FIRE
 
     def is_heal(self, pos: list) -> bool:
-        return self.__plain[pos[0]][pos[1]] == HEAL
+        return self.__plain[pos[0]][pos[1]] == HEALTH
 
     def is_key(self, pos: list) -> bool:
         return self.__plain[pos[0]][pos[1]] == KEY
@@ -268,7 +271,7 @@ class Game:
         if self.__map.is_valid_move(dydx=dydx, p=p):
             return
         p.receive_damage()
-        logging.info(f'{p.name} hit the wall: - 1 health')
+        logging.info(f'{p.name} hit the wall: {p.health} health')
         if not p.is_alive:
             self.__drop_key_and_kick_after_death(p)
             self.__action()
@@ -288,7 +291,7 @@ class Game:
     def __check_step_on_fire(self, p: Player):
         if self.__map.is_fire(p.cur):
             p.receive_damage()
-            logging.info(f'{p.name} stepped on fire: -1 health')
+            logging.info(f'{p.name} stepped on fire: {p.health} health')
             if not p.is_alive:
                 self.__drop_key_and_kick_after_death(p)
                 self.__action()
@@ -304,7 +307,7 @@ class Game:
     def __check_cell_is_heal(self, p: Player):
         if self.__map.is_heal(p.cur):
             p.restore_health()
-            logging.info(f'{p.name} restored health: 5 / 5 health')
+            logging.info(f'{p.name} restored health: {p.health} health')
             self.__queue.appendleft(p)
             self.__action()
 
@@ -316,6 +319,7 @@ class Game:
             else:
                 logging.info(f'{p.name} came to the finish without key')
                 self.__drop_key_and_kick_after_death(p)
+                self.__action()
 
     def __handle_move(self, key: str, p: Player):
         dydx = move[key]
@@ -331,7 +335,46 @@ class Game:
         self.__queue.appendleft(p)
         self.__action()
 
+    def __handle_heal(self, p: Player):
+        if p.can_heal:
+            p.heal()
+            logging.info(f'{p.name} healed himself: {p.health} health')
+            self.__queue.appendleft(p)
+            self.__action()
+        else:
+            logging.info(f'{p.name} should either have max health or have no HP')
+            self.__queue.append(p)
+            self.__action()
+
+    def __handle_key(self, p: Player):
+        if self.__map.is_key(p.cur):
+            p.assign_key()
+            self.__map.clear_key()
+            logging.info(f'{p.name} took key')
+            self.__queue.appendleft(p)
+            self.__action()
+        else:
+            logging.info(f'There is no key in current position')
+            self.__queue.append(p)
+            self.__action()
+
+    def __handle_fight(self, p: Player):
+        for player in self.__queue:
+            if player.cur == p.cur:
+                player.receive_damage()
+                logging.info(f'{player.name} received damage from {p.name}: {player.health} health left')
+                if not player.is_alive:
+                    self.__drop_key_and_kick_after_death(player)
+        self.__queue.appendleft(p)
+        self.__action()
+
     def __action(self):
+        # if no players left
+        if len(self.__queue) == 0:
+            logging.info('No players left: game is over')
+            sys.exit()
+        # clear previously generated fire cells
+        self.__map.clear_fire()
         # before each action spawn fire
         self.__map.spawn_fire()
         # pop player from queue
@@ -341,8 +384,14 @@ class Game:
             self.__handle_save(player)
         elif key in [UP, DOWN, LEFT, RIGHT]:
             self.__handle_move(key=key, p=player)
-        # clear fire cells after each action
-        self.__map.clear_fire()
+        elif key == HEAL:
+            self.__handle_heal(player)
+        elif key == KEY:
+            self.__handle_key(player)
+        elif key == FIGHT:
+            self.__handle_fight(player)
+        else:
+            logging.info('Invalid key: try again')
 
     def __start(self):
         num = int(input('Enter amount of players: '))
