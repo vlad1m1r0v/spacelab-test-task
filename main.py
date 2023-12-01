@@ -410,8 +410,7 @@ class Game:
             if answer == YES:
                 self.__load()
                 self.__action()
-        else:
-            self.__start()
+        self.__start()
 
 
 game = Game()
