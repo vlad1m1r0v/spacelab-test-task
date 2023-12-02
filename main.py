@@ -30,19 +30,7 @@ HEALTH = 'H'
 FINISH = 'F'
 # 'D' stands for Damage
 FIRE = 'D'
-
-
-def white_cells(plain):
-    cells = []
-    for row in range(len(plain)):
-        for col in range(len(plain[row])):
-            if plain[row][col] == FREE:
-                cells.append((row, col))
-    return cells
-
-
-# for putting fire on them randomly
-WHITE_CELLS = white_cells(INITIAL_PLAIN)
+# amount of fire to be put on map
 FIRE_AMOUNT = 4
 # actions keys
 YES = 'y'
@@ -161,8 +149,16 @@ class GameMap:
                     if not many:
                         return
 
+    def __white_cells(self):
+        cells = []
+        for row in range(len(self.__plain)):
+            for col in range(len(self.__plain[row])):
+                if self.__plain[row][col] == FREE:
+                    cells.append((row, col))
+        return cells
+
     def spawn_fire(self):
-        fire_cells = random.sample(WHITE_CELLS, FIRE_AMOUNT)
+        fire_cells = random.sample(self.__white_cells(), FIRE_AMOUNT)
         for cell in fire_cells:
             self.__mark_cell(cell, FIRE)
         logging.info(f'Fire spawned at cells {", ".join(map(str, fire_cells))}')
