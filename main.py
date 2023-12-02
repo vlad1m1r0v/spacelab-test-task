@@ -197,7 +197,7 @@ class GameMap:
         pos_y, pos_x = py + dy, px + dx
         is_inside_map = 0 <= pos_y < len(self.__plain) and 0 <= pos_x < len(self.plain[0])
         if not is_inside_map:
-            return is_inside_map
+            return False
         return self.__plain[pos_y][pos_x] != BLOCKED
 
 
